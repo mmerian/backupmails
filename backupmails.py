@@ -12,11 +12,13 @@ import os
 import argparse
 import sys
 import email
+import email.utils
 import logging
 import mailbox
 import re
 import signal
 import socket
+import time
 
 from getpass import getpass
 from imaplib import IMAP4,IMAP4_SSL
@@ -49,7 +51,7 @@ def backup_imap_folder(folder):
     logger.info('Processing folder '+folder)
     try:
         client.select(folder, True)
-        r, data = client.uid('search', None, 'ALL')
+        search_command = 'ALL'
         mboxfilename = args.mboxprefix+folder.replace('"', '').replace('/', '.')+'.mbox'
         if args.dest_dir is not None:
             mboxfilename = os.path.join(args.dest_dir, mboxfilename)
@@ -58,6 +60,26 @@ def backup_imap_folder(folder):
         if not args.cont:
             mbox.clear()
             mbox.flush()
+        else:
+            # Asked to continue.
+            # Let's find the newest message
+            # into the mbox file, so we can filter
+            # on the imap server
+            newest_date = None
+            for message in mbox:
+                if 'Date' in message:
+                    message_date = email.utils.parsedate(message['Date'])
+                    if message_date is not None:
+                        try:
+                            message_date = time.mktime(message_date)
+                            if (newest_date is None) or (message_date > newest_date):
+                                newest_date = message_date
+                        except Exception as e:
+                            pass
+            if newest_date is not None:
+                search_command = '(SINCE "'+time.strftime('%d-%b-%Y', time.gmtime(newest_date))+'")'
+        logger.debug('IMAP search command : '+search_command)
+        r, data = client.uid('search', None, search_command)
         msgids = data[0].split()
         nummsgs = len(msgids)
         if 1 == nummsgs:
@@ -69,17 +91,22 @@ def backup_imap_folder(folder):
             try:
                 r, msgdata = client.uid('fetch', msgid, '(RFC822)')
                 message = email.message_from_string(msgdata[0][1])
+                processed += 1
                 if args.cont and message.has_key('Message-ID'):
+                    message_exists = False
                     for m in mbox:
                         if (m.has_key('Message-ID')) and (message['Message-ID'] == m['Message-ID']):
-                            logger.info('Message '+message['Message-ID']+' already in mailbox')
-                            continue
+                            logger.debug('Message '+message['Message-ID']+' already in mailbox')
+                            message_exists = True
+                            break
+                    if message_exists:
+                        continue
                 mbox.add(message)
             except Exception as e:
                 logger.exception(e)
-            processed += 1
             if 0 == processed % 50:
                 logger.info(str(processed)+'/'+str(nummsgs)+' messages processed')
+        logger.info('All messages processed')
         mbox.flush()
         mbox.unlock()
         mbox.close()
