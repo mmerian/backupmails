@@ -25,6 +25,13 @@ from imaplib import IMAP4,IMAP4_SSL
 
 parser = argparse.ArgumentParser(description = 'Creates mailbox files from messages on an IMAP server')
 
+parser.add_argument('-v', '--verbose',
+    help = 'be verbose',
+    action = 'store_const',
+    dest = 'loglevel',
+    const = logging.DEBUG,
+    default = logging.INFO
+)
 parser.add_argument('--host', help = 'mail server host name', required = True)
 parser.add_argument('--port', help = 'mail server port', type = int, default = 143)
 parser.add_argument('--username', help = 'mail server username', required = True)
@@ -40,7 +47,7 @@ args = parser.parse_args()
 client = None
 mbox = None
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(args.loglevel)
 logger.addHandler(logging.StreamHandler())
 
 list_response_pattern = re.compile(r'\((?P<flags>.*?)\) "(?P<delimiter>.*)" (?P<name>.*)')
@@ -83,9 +90,9 @@ def backup_imap_folder(folder):
         msgids = data[0].split()
         nummsgs = len(msgids)
         if 1 == nummsgs:
-            logger.info('1 message in folder')
+            logger.debug('1 message in folder')
         else:
-            logger.info(str(nummsgs)+' messages in folder')
+            logger.debug(str(nummsgs)+' messages in folder')
         processed = 0
         for msgid in msgids:
             try:
