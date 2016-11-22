@@ -64,6 +64,7 @@ def backup_imap_folder(folder):
             mboxfilename = os.path.join(args.dest_dir, mboxfilename)
         mbox = mailbox.mbox(mboxfilename)
         mbox.lock()
+        newest_date = None
         if not args.cont:
             mbox.clear()
             mbox.flush()
@@ -84,6 +85,7 @@ def backup_imap_folder(folder):
                         except Exception as e:
                             pass
             if newest_date is not None:
+                logger.debug('Newest message in mailbox received on '+time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(newest_date)))
                 search_command = '(SINCE "'+time.strftime('%d-%b-%Y', time.gmtime(newest_date))+'")'
         logger.debug('IMAP search command : '+search_command)
         r, data = client.uid('search', None, search_command)
@@ -99,15 +101,19 @@ def backup_imap_folder(folder):
                 r, msgdata = client.uid('fetch', msgid, '(RFC822)')
                 message = email.message_from_string(msgdata[0][1])
                 processed += 1
-                if args.cont and message.has_key('Message-ID'):
-                    message_exists = False
-                    for m in mbox:
-                        if (m.has_key('Message-ID')) and (message['Message-ID'] == m['Message-ID']):
-                            logger.debug('Message '+message['Message-ID']+' already in mailbox')
-                            message_exists = True
-                            break
-                    if message_exists:
-                        continue
+                if args.cont and message.has_key('Message-ID') and newest_date is not None:
+                    message_date = email.utils.parsedate(message['Date'])
+                    if time.mktime(message_date) <= newest_date:
+                        message_exists = False
+                        for m in mbox:
+                            if (m.has_key('Message-ID')) and (message['Message-ID'] == m['Message-ID']):
+                                logger.debug('Message '+message['Message-ID']+' already in mailbox')
+                                message_exists = True
+                                break
+                        if message_exists:
+                            continue
+                    else:
+                        logger.debug('Message date is '+message['Date']+'. Not searching if it exists')
                 mbox.add(message)
             except Exception as e:
                 logger.exception(e)
@@ -119,6 +125,9 @@ def backup_imap_folder(folder):
         mbox.close()
     except Exception as e:
         logger.exception(e)
+        mbox.flush()
+        mbox.unlock()
+        mbox.close()
 
 def handle_signal(signal, frame):
     global mbox
